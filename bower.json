@@ -1,6 +1,6 @@
 {
   "name": "jquery.floatThead",
-  "version": "1.1.1",
+  "version": "1.2.1",
   "homepage": "http://mkoryak.github.io/floatThead/",
   "authors": [
     "Misha Koryak <mkoryak@gmail.com>"
@@ -18,5 +18,9 @@
     "test",
     "demo",
     "USED_BY.md"
-  ]
+  ],
+  "dependencies": {
+    "jquery": ">= 1.9.0",
+    "underscore": ">= 1.3.0"
+  }
 }
