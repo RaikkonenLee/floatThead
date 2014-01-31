@@ -27,7 +27,7 @@
       cellTag: 'th', //thead cells are this
       zIndex: 1001, //zindex of the floating thead (actually a container div)
       debounceResizeMs: 1,
-      useAbsolutePositioning: null, //if set to NULL - defaults: has scrollContainer=true, doesn't have scrollContainer=false
+      useAbsolutePositioning: true, //if set to NULL - defaults: has scrollContainer=true, doesn't have scrollContainer=false
       scrollingTop: 0, //String or function($table) - offset from top of window where the header should not pass above
       scrollingBottom: 0, //String or function($table) - offset from the bottom of the table where the header should stop scrolling
       scrollContainer: function($table){
@@ -38,6 +38,7 @@
         // it should return a jquery object containing a wrapped set of table cells comprising a row that contains no col spans and is visible
         return $table.find('tbody tr:visible:first>td');
       },
+      columnWidths: "auto",// 'auto', array, function
       floatTableClass: 'floatThead-table',
       floatContainerClass: 'floatThead-container',
       debug: false //print possible issues (that don't prevent script loading) to console, if console exists.
@@ -237,7 +238,7 @@
         top:  useAbsolutePositioning ? 0 : 'auto',
         zIndex: opts.zIndex
       });
-      $floatContainer.addClass(opts.floatContainerClass)
+      $floatContainer.addClass(opts.floatContainerClass);
       updateScrollingOffsets();
 
       var layoutFixed = {'table-layout': 'fixed'};
@@ -305,9 +306,10 @@
         return count;
       }
 
-      function refloat(){ //make the thing float
-        if(!headerFloated){
+      function floatHeader(override){ //make the thing float
+        if(override || !headerFloated){
           headerFloated = true;
+          $floatContainer.css({height: "auto"});
           $table.css(layoutFixed);
           $floatTable.css(layoutFixed);
           $floatTable.append($header); //append because colgroup must go first in chrome
@@ -315,13 +317,14 @@
           setHeaderHeight();
         }
       }
-      function unfloat(){ //put the header back into the table
+      function unfloatHeader(){ //put the header back into the table
         if(headerFloated){
           headerFloated = false;
           $newHeader.detach();
           $table.prepend($header);
           $table.css(layoutAuto);
           $floatTable.css(layoutAuto);
+          $floatContainer.css({height: 0});
         }
       }
       function changePositioning(isAbsolute){
@@ -332,13 +335,35 @@
           });
         }
       }
-      function getSizingRow($table, $cols, $fthCells, ieVersion){
+      function getSizingRow($table, $cols, $fthCells){
         if(isChrome){
           return $fthCells;
         } else if(ieVersion) {
           return opts.getSizingRow($table, $cols, $fthCells);
         } else {
           return $cols;
+        }
+      }
+      function getColumnWidths($table, $cols, $fthCells){
+        if(_.isArray(opts.columnWidths)){
+          var tableWidth = null;
+          return _.map(opts.columnWidths, function(width){
+            if(_.isString(width)){ //only support percent widths as a string
+              //TODO: i dont think i need to do this!
+              width = width.replace(/\D/g, '');
+              if(tableWidth == null){
+                tableWidth = $table.width();
+              }
+              return parseFloat(width) / 100 * tableWidth;
+            } else {
+              return width; //only supporting % widths and assume everything else is a pixel width
+            }
+          });
+        } else if(_.isFunction(opts.columnWidths)){
+          unfloatHeader(true); //so that the table has the header we expect ;)
+          return opts.columnWidths($table); //expecting array of pixel widths
+        } else { //opts.columnWidths == 'auto'
+          return _.map(getSizingRow($table, $cols, $fthCells), function(el){ return el.offsetWidth; });
         }
       }
 
@@ -350,16 +375,21 @@
         var i;
         var numCols = columnNum(); //if the tables columns change dynamically since last time (datatables) we need to rebuild the sizer rows and get new count
         return function(){
-          var $rowCells = getSizingRow($table, $tableCells, $fthCells, ieVersion);
-          if($rowCells.length == numCols && numCols > 0){
-            unfloat();
-            for(i=0; i < numCols; i++){
-              var _rowcell = $rowCells.get(i);
-              var rowWidth = _rowcell.offsetWidth;
-              $headerCells.eq(i).width(rowWidth);
-              $tableCells.eq(i).width(rowWidth);
+          var columnWidths = getColumnWidths($table, $tableCells, $fthCells, ieVersion);
+          var doCompute = opts.columnWidths == "auto";
+
+          if(columnWidths.length == numCols && numCols > 0){
+            if(doCompute){
+              unfloatHeader();
+            } else {
+              floatHeader(true);
             }
-            refloat();
+            for(i=0; i < numCols; i++){
+              var colWidth = columnWidths[i];
+              $headerCells.eq(i).width(colWidth);
+              $tableCells.eq(i).width(colWidth);
+            }
+            doCompute && floatHeader();
           } else {
             $floatTable.append($header);
             $table.css(layoutAuto);
@@ -450,19 +480,19 @@
               top = tableHeight - floatContainerHeight + captionScrollOffset; //scrolled past table
             } else if (tableOffset.top > windowTop + scrollingTop) {
               top = 0; //scrolling to table
-              unfloat();
+              unfloatHeader();
             } else {
               top = scrollingTop + windowTop - tableOffset.top + tableContainerGap + (captionAlignTop ? captionHeight : 0);
-              refloat(); //scrolling within table. header floated
+              floatHeader(); //scrolling within table. header floated
             }
             left =  0;
           } else if(locked && !useAbsolutePositioning){ //inner scrolling, fixed positioning
             if (tableContainerGap > scrollingContainerTop) {
               top = tableOffset.top - windowTop;
-              unfloat();
+              unfloatHeader();
             } else {
               top = tableOffset.top + scrollingContainerTop  - windowTop - tableContainerGap;
-              refloat();
+              floatHeader();
               //headers stop at the top of the viewport
             }
             left = tableOffset.left + scrollContainerLeft - windowLeft;
@@ -473,7 +503,7 @@
               //scrolled past the bottom of the table
             } else if (tableOffset.top > windowTop + scrollingTop) {
               top = tableOffset.top - windowTop;
-              refloat();
+              floatHeader();
               //scrolled past the top of the table
             } else {
               //scrolling within the table
@@ -481,6 +511,7 @@
             }
             left = tableOffset.left - windowLeft;
           }
+          //console.log({top: top, left: left})
           return {top: top, left: left};
         };
       }
